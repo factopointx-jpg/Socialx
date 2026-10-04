@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SocialX — Social Platform</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#fafafa;color:#111}
+header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #ddd;height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 18px}
+.logo{font-size:22px;font-weight:800}.nav{display:flex;gap:8px}button{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:700}
+.primary{background:#111;color:#fff}.light{background:#eee}.danger{background:#ffe5e5;color:#b00}
+main{max-width:720px;margin:auto;padding:20px 12px 80px}.card{background:#fff;border:1px solid #ddd;border-radius:14px;margin:14px 0;overflow:hidden}
+.auth{max-width:420px;margin:70px auto;padding:24px}.auth input,.auth textarea,.composer input{width:100%;padding:12px;margin:7px 0;border:1px solid #ccc;border-radius:9px}
+.tabs{display:flex;gap:8px;margin-bottom:15px}.hidden{display:none!important}
+.profile{padding:20px;display:flex;gap:16px;align-items:center}.avatar{width:68px;height:68px;border-radius:50%;object-fit:cover;background:#ddd}
+.post-head{display:flex;align-items:center;gap:10px;padding:12px}.post-head img{width:40px;height:40px;border-radius:50%;object-fit:cover}.post-media{width:100%;max-height:650px;object-fit:cover;background:#eee}.post-body{padding:12px}.actions{display:flex;gap:8px}.comment{border-top:1px solid #eee;padding:10px 12px;font-size:14px}.small{color:#666;font-size:13px}.modal{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:10}.modal>div{background:#fff;padding:22px;border-radius:15px;width:min(92%,430px)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SocialX</div>
+  <div class="nav">
+    <button id="feedBtn" class="light">Home</button>
+    <button id="profileBtn" class="light">Profile</button>
+    <button id="logoutBtn" class="danger hidden">Logout</button>
+  </div>
+</header>
+
+<main>
+<section id="authView" class="card auth">
+  <h2 id="authTitle">Login</h2>
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password">
+  <input id="username" class="hidden" placeholder="Username">
+  <button id="authAction" class="primary" style="width:100%">Login</button>
+  <button id="switchAuth" class="light" style="width:100%;margin-top:8px">Create account</button>
+  <p id="authMsg" class="small"></p>
+</section>
+
+<section id="appView" class="hidden">
+  <div id="profileBox" class="card hidden"></div>
+
+  <div class="card composer">
+    <div style="padding:14px">
+      <h3>Create Post</h3>
+      <input id="postCaption" placeholder="Write a caption...">
+      <input id="postFile" type="file" accept="image/*">
+      <button id="postBtn" class="primary">Publish Post</button>
+      <p id="postMsg" class="small"></p>
+    </div>
+  </div>
+
+  <div id="feed"></div>
+</section>
+</main>
+
+<div id="modal" class="modal hidden">
+ <div>
+   <h3>Edit Profile</h3>
+   <input id="editUsername" style="width:100%;padding:12px" placeholder="Username">
+   <textarea id="editBio" style="width:100%;padding:12px;margin-top:8px" placeholder="Bio"></textarea>
+   <div style="margin-top:10px;display:flex;gap:8px">
+     <button id="saveProfile" class="primary">Save</button>
+     <button id="closeModal" class="light">Cancel</button>
+   </div>
+ </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ==============================
+   1) PASTE YOUR SUPABASE VALUES
+   ============================== */
+const SUPABASE_URL = "PASTE_YOUR_SUPABASE_URL";
+const SUPABASE_KEY = "PASTE_YOUR_SUPABASE_PUBLISHABLE_KEY";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let isSignup=false, currentUser=null;
+
+const $=id=>document.getElementById(id);
+function msg(id,t){$(id).textContent=t}
+function show(id,on=true){$(id).classList.toggle("hidden",!on)}
+
+async function init(){
+ const {data:{session}}=await sb.auth.getSession();
+ currentUser=session?.user||null;
+ renderAuth();
+ if(currentUser){await loadProfile();await loadFeed();}
+}
+function renderAuth(){
+ show("authView",!currentUser); show("appView",!!currentUser); show("logoutBtn",!!currentUser);
+}
+
+$("switchAuth").onclick=()=>{
+ isSignup=!isSignup;
+ $("authTitle").textContent=isSignup?"Create account":"Login";
+ $("authAction").textContent=isSignup?"Sign up":"Login";
+ $("switchAuth").textContent=isSignup?"Already have an account":"Create account";
+ show("username",isSignup);
+ msg("authMsg","");
+};
+
+$("authAction").onclick=async()=>{
+ const email=$("email").value.trim(), password=$("password").value;
+ if(!email||!password)return msg("authMsg","Enter email and password.");
+ if(isSignup){
+   const username=$("username").value.trim();
+   if(!username)return msg("authMsg","Enter a username.");
+   const {data,error}=await sb.auth.signUp({email,password});
+   if(error)return msg("authMsg",error.message);
+   if(data.user){
+     const {error:e}=await sb.from("profiles").insert({id:data.user.id,username});
+     if(e) console.warn(e.message);
+   }
+   msg("authMsg","Account created. Check your email if confirmation is enabled.");
+ }else{
+   const {data,error}=await sb.auth.signInWithPassword({email,password});
+   if(error)return msg("authMsg",error.message);
+   currentUser=data.user; renderAuth(); await loadProfile(); await loadFeed();
+ }
+};
+
+$("logoutBtn").onclick=async()=>{await sb.auth.signOut();currentUser=null;renderAuth();};
+$("feedBtn").onclick=()=>{if(currentUser)loadFeed()};
+$("profileBtn").onclick=()=>{if(currentUser)loadProfile(true)};
+
+async function loadProfile(open=false){
+ const {data,error}=await sb.from("profiles").select("*").eq("id",currentUser.id).single();
+ if(error)return;
+ $("profileBox").innerHTML=`
+ <div class="profile">
+   <img class="avatar" src="${data.avatar_url||'https://placehold.co/100x100'}">
+   <div style="flex:1"><h2>@${escapeHtml(data.username||"user")}</h2><div>${escapeHtml(data.bio||"")}</div>
+   <div class="small">Joined ${new Date(data.created_at).toLocaleDateString()}</div></div>
+   <button id="editBtn" class="light">Edit</button>
+ </div>`;
+ $("editBtn").onclick=()=>{
+   $("editUsername").value=data.username||"";$("editBio").value=data.bio||"";show("modal");
+ };
+ if(open){show("profileBox");$("profileBox").scrollIntoView({behavior:"smooth"});}
+ else show("profileBox",false);
+}
+
+$("closeModal").onclick=()=>show("modal",false);
+$("saveProfile").onclick=async()=>{
+ const username=$("editUsername").value.trim(),bio=$("editBio").value.trim();
+ const {error}=await sb.from("profiles").update({username,bio}).eq("id",currentUser.id);
+ if(error)return alert(error.message);
+ show("modal",false);await loadProfile(true);
+};
+
+$("postBtn").onclick=async()=>{
+ const file=$("postFile").files[0],caption=$("postCaption").value.trim();
+ if(!file)return msg("postMsg","Choose an image first.");
+ msg("postMsg","Uploading...");
+ const ext=file.name.split(".").pop();
+ const path=currentUser.id+"/"+crypto.randomUUID()+"."+ext;
+ const {error:up}=await sb.storage.from("post-media").upload(path,file);
+ if(up)return msg("postMsg",up.message);
+ const {data:urlData}=sb.storage.from("post-media").getPublicUrl(path);
+ const {error}=await sb.from("posts").insert({user_id:currentUser.id,caption,image_url:urlData.publicUrl});
+ if(error)return msg("postMsg",error.message);
+ $("postFile").value="";$("postCaption").value="";msg("postMsg","Posted!");
+ await loadFeed();
+};
+
+async function loadFeed(){
+ show("profileBox",false);
+ const {data:posts,error}=await sb.from("posts").select("*, profiles(username,avatar_url), likes(user_id), comments(id,user_id,comment,profiles(username))").order("created_at",{ascending:false});
+ if(error){$("feed").innerHTML='<div class="card" style="padding:20px">'+escapeHtml(error.message)+'</div>';return;}
+ $("feed").innerHTML=posts.map(p=>{
+   const liked=p.likes?.some(x=>x.user_id===currentUser.id);
+   return `<article class="card">
+    <div class="post-head"><img src="${p.profiles?.avatar_url||'https://placehold.co/80x80'}"><div><b>@${escapeHtml(p.profiles?.username||"user")}</b><div class="small">${new Date(p.created_at).toLocaleString()}</div></div></div>
+    <img class="post-media" src="${p.image_url}" alt="Post">
+    <div class="post-body">
+      <div class="actions"><button class="${liked?'primary':'light'}" onclick="toggleLike('${p.id}',${liked})">♥ ${p.likes?.length||0}</button></div>
+      <p>${escapeHtml(p.caption||"")}</p>
+      <div class="comments">${(p.comments||[]).map(c=>`<div class="comment"><b>@${escapeHtml(c.profiles?.username||"user")}</b> ${escapeHtml(c.comment)}</div>`).join("")}</div>
+      <div style="display:flex;gap:6px;margin-top:8px"><input id="c-${p.id}" placeholder="Add a comment..." style="flex:1;padding:10px;border:1px solid #ccc;border-radius:8px"><button class="primary" onclick="addComment('${p.id}')">Send</button></div>
+    </div>
+   </article>`;
+ }).join("")||'<div class="card" style="padding:20px">No posts yet. Create the first one!</div>';
+}
+window.toggleLike=async(id,liked)=>{
+ if(liked) await sb.from("likes").delete().eq("post_id",id).eq("user_id",currentUser.id);
+ else await sb.from("likes").insert({post_id:id,user_id:currentUser.id});
+ loadFeed();
+};
+window.addComment=async(id)=>{
+ const el=$("c-"+id),comment=el.value.trim();if(!comment)return;
+ const {error}=await sb.from("comments").insert({post_id:id,user_id:currentUser.id,comment});
+ if(error)alert(error.message);else{el.value="";loadFeed();}
+};
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
+sb.auth.onAuthStateChange((_event,session)=>{currentUser=session?.user||null;renderAuth();});
+init();
+</script>
+</body>
+</html>
